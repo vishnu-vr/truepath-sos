@@ -47,6 +47,28 @@ Actions (target by `email` or `uid` where applicable):
 403 if caller is neither owner nor primary · 404 unknown cane or email.
 The `members{uid:{name,email}}` map is recomputed to only hold current people.
 
+## POST /registerToken — claim a phone's FCM token
+
+Requires an ID token. Registers the token on the caller's `users` doc AND
+removes it from any other account still holding it (same phone, previous
+sign-in) — a phone's token belongs to exactly one account, so nobody receives
+pushes for alerts they can't read. The app also removes its token on sign-out.
+```json
+{ "token": "<fcm registration token>" }
+```
+
+## POST /mockSos — admin demo trigger
+
+Requires an ID token with the `admin` custom claim. Fires the exact same
+alert + push pipeline as `/sos` but authenticates the admin instead of the
+device secret. Alerts get `simulated: true` and the push title says "(test)".
+```json
+{ "deviceId": "cane-xxx", "lat": 9.98, "lng": 76.29, "battery": 42 }   // all but deviceId optional
+```
+- 201 `{ok, alertId, pushSent}` · 403 not admin · 404 unknown cane ·
+  409 cane not claimed. Defaults: jittered Kochi coords, last known battery.
+- Used by the website's "🧪 Test SOS" button (admin view).
+
 ## POST /provision — "the factory"
 
 Emulator: open. Production: requires an admin ID token (custom claim).

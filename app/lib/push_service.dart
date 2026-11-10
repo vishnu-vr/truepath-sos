@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'api.dart';
+
 /// Wires Firebase Cloud Messaging for the caregiver (doc steps 13-15):
 /// permission, the max-importance "sos_alerts" channel, token registration in
 /// Firestore, foreground display, and tap -> SOS screen navigation.
@@ -19,6 +21,7 @@ class PushService {
 
   final _local = FlutterLocalNotificationsPlugin();
   bool _wired = false;
+  String? _lastToken;
   void Function(String alertId)? _onOpenAlert;
 
   Future<void> register({
@@ -91,12 +94,36 @@ class PushService {
     if (alertId != null && alertId.isNotEmpty) _onOpenAlert?.call(alertId);
   }
 
-  Future<void> _saveToken(String uid, String token) {
-    return FirebaseFirestore.instance.collection('users').doc(uid).set(
-      {
-        'fcmTokens': FieldValue.arrayUnion([token]),
-      },
-      SetOptions(merge: true),
-    );
+  /// Claims the token for this account via the backend, which also removes
+  /// it from any OTHER account that still holds it (same phone, previous
+  /// sign-in) — otherwise this phone would keep receiving alerts the current
+  /// account cannot read.
+  Future<void> _saveToken(String uid, String token) async {
+    _lastToken = token;
+    try {
+      await backend('registerToken', {'token': token});
+    } catch (_) {
+      // Backend unreachable: at least register it for this account directly.
+      await FirebaseFirestore.instance.collection('users').doc(uid).set(
+        {
+          'fcmTokens': FieldValue.arrayUnion([token]),
+        },
+        SetOptions(merge: true),
+      );
+    }
+  }
+
+  /// Call before signing out so this phone stops receiving this account's
+  /// alerts.
+  Future<void> unregister(String uid) async {
+    final token = _lastToken;
+    if (token == null) return;
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'fcmTokens': FieldValue.arrayRemove([token]),
+      });
+    } catch (_) {
+      // Best effort; the backend also reclaims tokens on next sign-in.
+    }
   }
 }

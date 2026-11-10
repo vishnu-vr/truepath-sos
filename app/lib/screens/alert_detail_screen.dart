@@ -32,7 +32,21 @@ class AlertDetailScreen extends StatelessWidget {
         stream: docRef.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
+            final denied = snapshot.error.toString().contains('permission-denied');
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  denied
+                      ? 'This alert belongs to a cane your current account is not '
+                          'a caregiver of.\n\nIt may have been meant for an account '
+                          'that was previously signed in on this phone — sign in '
+                          'with that account to view it.'
+                      : 'Error: ${snapshot.error}',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());

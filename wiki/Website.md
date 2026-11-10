@@ -31,6 +31,11 @@ Decided by the `admin` custom claim on the signed-in account
 The scoping is enforced by Firestore security rules, not just the UI — a
 non-admin running the admin queries gets permission errors.
 
+Admins also get a **🧪 Test SOS** button on each active cane: it calls the
+backend's `/mockSos` with the admin's ID token, firing the real alert + push
+pipeline (alert tagged `test` in the alerts table, push titled "(test)").
+Great for demos — no simulator or terminal needed.
+
 ## Notes
 
 - The web Firebase config (apiKey etc.) is embedded in the page; it comes

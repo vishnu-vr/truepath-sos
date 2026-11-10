@@ -109,6 +109,19 @@ exports.sos = onRequest({ region: REGION, cors: true }, async (req, res) => {
     return;
   }
 
+  const { alertId, pushSent } = await fireAlert(deviceRef, device, {
+    type, sentAt, lat, lng, battery, simulated: false,
+  });
+  res.status(201).json({ ok: true, alertId, pushSent });
+});
+
+/**
+ * Shared alert pipeline (doc steps 11-13): store the alert, update the
+ * device, push to every caregiver's phones, prune dead tokens. Used by the
+ * real /sos and the admin /mockSos.
+ */
+async function fireAlert(deviceRef, device, { type, sentAt, lat, lng, battery, simulated }) {
+  const deviceId = deviceRef.id;
   const caregiverUids = device.caregiverUids || [];
   const memberUids = [...new Set([...caregiverUids, device.caneUserUid].filter(Boolean))];
 
@@ -122,6 +135,7 @@ exports.sos = onRequest({ region: REGION, cors: true }, async (req, res) => {
     status: "active",
     location: new GeoPoint(lat, lng),
     battery,
+    simulated: !!simulated,
     sentAt: Timestamp.fromDate(sentAt),
     createdAt: FieldValue.serverTimestamp(),
     resolvedAt: null,
@@ -149,7 +163,7 @@ exports.sos = onRequest({ region: REGION, cors: true }, async (req, res) => {
       const result = await admin.messaging().sendEachForMulticast({
         tokens,
         notification: {
-          title: "🆘 TruePath SOS",
+          title: simulated ? "🧪 TruePath SOS (test)" : "🆘 TruePath SOS",
           body: `${device.name || deviceId} may need help — tap to see their location`,
         },
         data: {
@@ -188,8 +202,53 @@ exports.sos = onRequest({ region: REGION, cors: true }, async (req, res) => {
     }
   }
 
-  logger.info("SOS stored", { alertId: alertRef.id, deviceId, pushSent: sent });
-  res.status(201).json({ ok: true, alertId: alertRef.id, pushSent: sent });
+  logger.info("SOS stored", { alertId: alertRef.id, deviceId, pushSent: sent, simulated: !!simulated });
+  return { alertId: alertRef.id, pushSent: sent };
+}
+
+/**
+ * Admin-only demo trigger: fires the full SOS pipeline for a cane WITHOUT
+ * the device secret (ID token + admin claim instead). Alerts are marked
+ * `simulated: true` and the push title says "(test)".
+ * Body: { deviceId, lat?, lng?, battery? }
+ */
+exports.mockSos = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  if (!postOnly(req, res)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (user.admin !== true) {
+    res.status(403).json({ error: "admin only" });
+    return;
+  }
+
+  const { deviceId, lat, lng, battery } = req.body || {};
+  if (typeof deviceId !== "string" || !deviceId) {
+    res.status(400).json({ error: "deviceId required" });
+    return;
+  }
+  const deviceRef = db.collection("devices").doc(deviceId);
+  const deviceSnap = await deviceRef.get();
+  if (!deviceSnap.exists) {
+    res.status(404).json({ error: "no such cane" });
+    return;
+  }
+  const device = deviceSnap.data();
+  if (device.status !== "active") {
+    res.status(409).json({ error: "cane has not been claimed/activated yet" });
+    return;
+  }
+
+  // Defaults: near Marine Drive, Kochi with a little jitter; keep last battery.
+  const jitter = () => (Math.random() - 0.5) * 0.004;
+  const { alertId, pushSent } = await fireAlert(deviceRef, device, {
+    type: "sos",
+    sentAt: new Date(),
+    lat: typeof lat === "number" ? lat : 9.9816 + jitter(),
+    lng: typeof lng === "number" ? lng : 76.2999 + jitter(),
+    battery: typeof battery === "number" ? battery : device.battery ?? 80,
+    simulated: true,
+  });
+  res.status(201).json({ ok: true, alertId, pushSent });
 });
 
 /* ---------------------------------------------------------------- claim */
@@ -354,6 +413,42 @@ exports.manage = onRequest({ region: REGION, cors: true }, async (req, res) => {
     throw e;
   }
   logger.info("Cane managed", { deviceId, action, by: user.uid });
+  res.json({ ok: true });
+});
+
+/* -------------------------------------------------------- registerToken */
+
+/**
+ * Claims an FCM token for the signed-in account. A phone's token must belong
+ * to exactly ONE user: if another account still holds it (e.g. someone signed
+ * out and a different person signed in on the same phone), it is removed
+ * there — otherwise the phone would keep receiving the old account's alerts
+ * it can no longer read.
+ * Body: { token }
+ */
+exports.registerToken = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  if (!postOnly(req, res)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  const { token } = req.body || {};
+  if (typeof token !== "string" || !token) {
+    res.status(400).json({ error: "token required" });
+    return;
+  }
+
+  const holders = await db
+    .collection("users")
+    .where("fcmTokens", "array-contains", token)
+    .get();
+  await Promise.all(
+    holders.docs
+      .filter((d) => d.id !== user.uid)
+      .map((d) => d.ref.update({ fcmTokens: FieldValue.arrayRemove(token) }))
+  );
+  await db.collection("users").doc(user.uid).set(
+    { fcmTokens: FieldValue.arrayUnion(token) },
+    { merge: true }
+  );
   res.json({ ok: true });
 });
 

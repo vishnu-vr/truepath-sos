@@ -46,6 +46,12 @@
   .pill.sos { background: var(--brand); color: #fff; }
   .pill.resolved { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
   .pill.role { background: var(--line); color: var(--muted); font-weight: 500; }
+  .pill.test { background: var(--line); color: var(--muted); }
+  button.mini {
+    padding: 5px 12px; font-size: 13px; border-radius: 8px;
+    background: var(--brand-soft); color: var(--brand); font-weight: 600;
+  }
+  button.mini:disabled { opacity: 0.6; cursor: default; }
   .muted { color: var(--muted); font-size: 13px; }
   button {
     background: var(--brand); color: #fff; border: 0; border-radius: 10px;
@@ -104,6 +110,34 @@ const app = initializeApp({
 });
 const auth = getAuth(app);
 const db = getFirestore(app);
+const BACKEND = "https://us-central1-truepath-sos-2611.cloudfunctions.net";
+
+/** Admin demo helper: fire a simulated SOS for a cane via the backend. */
+window.fireTestSos = async (deviceId, btn) => {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "sending…";
+  try {
+    const token = await auth.currentUser.getIdToken();
+    const res = await fetch(`${BACKEND}/mockSos`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ deviceId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    btn.textContent = `sent ✓ (push: ${data.pushSent})`;
+  } catch (e) {
+    btn.textContent = `failed: ${String(e.message).slice(0, 40)}`;
+  }
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.disabled = false;
+  }, 4000);
+};
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -152,16 +186,20 @@ onAuthStateChanged(auth, async (user) => {
         ].filter(Boolean).join(", ");
         return `${esc(m.name)}${roles ? ` <span class="pill role">${roles}</span>` : ""}`;
       }).join("<br>");
+      const actions = isAdmin && x.status === "active"
+        ? `<button class="mini" onclick="fireTestSos('${esc(d.id)}', this)">🧪 Test SOS</button>`
+        : "";
       return `<tr>
         <td><b>${esc(x.name)}</b><br><span class="muted">${esc(d.id)}</span></td>
         <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span></td>
         <td>${x.battery != null ? esc(x.battery) + "%" : "—"}<br>
             <span class="muted">${fmt(x.lastSeenAt)}</span></td>
         <td>${people || '<span class="muted">unclaimed</span>'}</td>
+        ${isAdmin ? `<td>${actions}</td>` : ""}
       </tr>`;
     }).join("");
     $("canes").innerHTML = rows
-      ? `<table><tr><th>Cane</th><th>Status</th><th>Battery · last seen</th><th>People</th></tr>${rows}</table>`
+      ? `<table><tr><th>Cane</th><th>Status</th><th>Battery · last seen</th><th>People</th>${isAdmin ? "<th></th>" : ""}</tr>${rows}</table>`
       : '<div class="muted">No canes.</div>';
   };
 
@@ -193,7 +231,7 @@ onAuthStateChanged(auth, async (user) => {
       return `<tr>
         <td>${fmt(x.sentAt)}</td>
         <td><b>${esc(x.deviceName)}</b></td>
-        <td><span class="pill ${x.status === "active" ? "sos" : "resolved"}">${esc(x.status)}</span></td>
+        <td><span class="pill ${x.status === "active" ? "sos" : "resolved"}">${esc(x.status)}</span>${x.simulated ? ' <span class="pill test">test</span>' : ""}</td>
         <td>${esc(x.battery)}%</td>
         <td>${loc}</td>
       </tr>`;

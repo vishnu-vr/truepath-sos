@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../push_service.dart';
 import 'alert_detail_screen.dart';
 import 'cane_screen.dart';
 import 'claim_screen.dart';
@@ -25,7 +26,11 @@ class HomeScreen extends StatelessWidget {
             IconButton(
               tooltip: 'Sign out',
               icon: const Icon(Icons.logout),
-              onPressed: () => FirebaseAuth.instance.signOut(),
+              onPressed: () async {
+                // Stop this phone from receiving this account's alerts.
+                await PushService.instance.unregister(uid);
+                await FirebaseAuth.instance.signOut();
+              },
             ),
           ],
           bottom: const TabBar(tabs: [
