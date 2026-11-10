@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- full-bleed flat red matching adaptive_icon_background, so the opaque
+       render is seamless with the background layer -->
+  <rect width="1024" height="1024" fill="#A12C21"/>
+  <g transform="translate(512 512) scale(0.55) translate(-512 -512)">
+    <path d="M512 176 L784 266 V512 C784 678 672 782 512 848 C352 782 240 678 240 512 V266 Z"
+          fill="#FFFFFF"/>
+    <path d="M472 356 H552 V472 H668 V552 H552 V668 H472 V552 H356 V472 H472 Z"
+          fill="#A12C21"/>
+    <g stroke="#FFFFFF" stroke-width="40" fill="none" stroke-linecap="round" opacity="0.95">
+      <path d="M806 210 a96 96 0 0 1 96 96"/>
+      <path d="M806 118 a188 188 0 0 1 188 188"/>
+    </g>
+  </g>
+</svg>
