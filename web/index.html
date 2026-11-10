@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TruePath Fleet</title>
+<style>
+  :root {
+    --bg: #fdf7f5; --card: #ffffff; --ink: #2b1a17; --muted: #8a7570;
+    --brand: #b03a2e; --brand-soft: #f7e3e0; --ok: #2e7d32; --line: #eadcd8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1412; --card: #261c19; --ink: #f3e9e6; --muted: #a78f89;
+      --brand: #e57368; --brand-soft: #3a2420; --ok: #81c784; --line: #3a2d29;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+    border-bottom: 1px solid var(--line); background: var(--card);
+    position: sticky; top: 0;
+  }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header h1 small { color: var(--muted); font-weight: normal; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px; margin-bottom: 20px;
+  }
+  h2 { font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase;
+       color: var(--muted); margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-weight: 600;
+       padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px;
+          font-size: 12px; font-weight: 600; }
+  .pill.active { background: var(--brand-soft); color: var(--brand); }
+  .pill.provisioned { background: var(--line); color: var(--muted); }
+  .pill.sos { background: var(--brand); color: #fff; }
+  .pill.resolved { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+  .pill.role { background: var(--line); color: var(--muted); font-weight: 500; }
+  .muted { color: var(--muted); font-size: 13px; }
+  button {
+    background: var(--brand); color: #fff; border: 0; border-radius: 10px;
+    padding: 10px 18px; font-size: 15px; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--brand); }
+  input {
+    width: 100%; padding: 10px 12px; margin-bottom: 10px; font-size: 15px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--bg); color: var(--ink);
+  }
+  #login { max-width: 360px; margin: 10vh auto; }
+  #err { color: var(--brand); min-height: 1.2em; font-size: 14px; }
+  a { color: var(--brand); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header class="hidden" id="topbar">
+  <h1>🦯 TruePath Fleet <small id="mode"></small></h1>
+  <span class="muted" id="who"></span>
+  <button class="ghost" id="signout">Sign out</button>
+</header>
+
+<div class="wrap">
+  <div id="login" class="card">
+    <h2>Sign in</h2>
+    <input id="email" type="email" placeholder="Email" autocomplete="username">
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <div id="err"></div>
+    <button id="signin">Sign in</button>
+  </div>
+
+  <div id="dash" class="hidden">
+    <div class="card"><h2 id="canes-title">Canes</h2><div id="canes"></div></div>
+    <div class="card"><h2>Recent alerts</h2><div id="alerts"></div></div>
+    <div class="card hidden" id="users-card"><h2>Accounts</h2><div id="users"></div></div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import {
+  getFirestore, collection, query, where, orderBy, limit, onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey: "AIzaSyBI-N9NK-kh_viosGwl2Mid4tzg7xIKM-k",
+  appId: "1:715122591091:web:16bb5568bf6236063a3106",
+  messagingSenderId: "715122591091",
+  projectId: "truepath-sos-2611",
+  authDomain: "truepath-sos-2611.firebaseapp.com",
+});
+const auth = getAuth(app);
+const db = getFirestore(app);
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let unsubs = [];
+
+$("signin").onclick = async () => {
+  $("err").textContent = "";
+  try {
+    await signInWithEmailAndPassword(auth, $("email").value.trim(), $("password").value);
+  } catch (e) {
+    $("err").textContent = e.message.replace("Firebase: ", "");
+  }
+};
+$("password").addEventListener("keydown", (e) => e.key === "Enter" && $("signin").click());
+$("signout").onclick = () => signOut(auth);
+
+onAuthStateChanged(auth, async (user) => {
+  unsubs.forEach((u) => u());
+  unsubs = [];
+  if (!user) {
+    $("login").classList.remove("hidden");
+    $("dash").classList.add("hidden");
+    $("topbar").classList.add("hidden");
+    return;
+  }
+  const isAdmin = (await user.getIdTokenResult()).claims.admin === true;
+  $("login").classList.add("hidden");
+  $("dash").classList.remove("hidden");
+  $("topbar").classList.remove("hidden");
+  $("who").textContent = user.email;
+  $("mode").textContent = isAdmin ? "· admin" : "· my canes";
+  $("canes-title").textContent = isAdmin ? "All canes" : "My canes";
+  $("users-card").classList.toggle("hidden", !isAdmin);
+
+  const fmt = (ts) => ts?.toDate ? ts.toDate().toLocaleString() : "—";
+
+  /* ---- canes ---- */
+  const renderCanes = (docsById) => {
+    const rows = [...docsById.values()].map((d) => {
+      const x = d.data();
+      const people = Object.entries(x.members || {}).map(([uid, m]) => {
+        const roles = [
+          uid === x.ownerUid && "owner",
+          uid === x.primaryCaregiverUid && "primary",
+          uid === x.caneUserUid && "cane user",
+        ].filter(Boolean).join(", ");
+        return `${esc(m.name)}${roles ? ` <span class="pill role">${roles}</span>` : ""}`;
+      }).join("<br>");
+      return `<tr>
+        <td><b>${esc(x.name)}</b><br><span class="muted">${esc(d.id)}</span></td>
+        <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span></td>
+        <td>${x.battery != null ? esc(x.battery) + "%" : "—"}<br>
+            <span class="muted">${fmt(x.lastSeenAt)}</span></td>
+        <td>${people || '<span class="muted">unclaimed</span>'}</td>
+      </tr>`;
+    }).join("");
+    $("canes").innerHTML = rows
+      ? `<table><tr><th>Cane</th><th>Status</th><th>Battery · last seen</th><th>People</th></tr>${rows}</table>`
+      : '<div class="muted">No canes.</div>';
+  };
+
+  const caneDocs = new Map();
+  const watchCanes = (q) => unsubs.push(onSnapshot(q, (snap) => {
+    snap.docChanges().forEach((ch) =>
+      ch.type === "removed" ? caneDocs.delete(ch.doc.id) : caneDocs.set(ch.doc.id, ch.doc));
+    renderCanes(caneDocs);
+  }, (e) => $("canes").innerHTML = `<div class="muted">${esc(e.message)}</div>`));
+  if (isAdmin) {
+    watchCanes(collection(db, "devices"));
+  } else {
+    watchCanes(query(collection(db, "devices"), where("caregiverUids", "array-contains", user.uid)));
+    watchCanes(query(collection(db, "devices"), where("caneUserUid", "==", user.uid)));
+    watchCanes(query(collection(db, "devices"), where("ownerUid", "==", user.uid)));
+  }
+
+  /* ---- alerts ---- */
+  const alertsQ = isAdmin
+    ? query(collection(db, "alerts"), orderBy("createdAt", "desc"), limit(50))
+    : query(collection(db, "alerts"), where("memberUids", "array-contains", user.uid),
+            orderBy("createdAt", "desc"), limit(50));
+  unsubs.push(onSnapshot(alertsQ, (snap) => {
+    const rows = snap.docs.map((d) => {
+      const x = d.data();
+      const loc = x.location
+        ? `<a target="_blank" href="https://www.google.com/maps/search/?api=1&query=${x.location.latitude},${x.location.longitude}">${x.location.latitude.toFixed(4)}, ${x.location.longitude.toFixed(4)}</a>`
+        : "—";
+      return `<tr>
+        <td>${fmt(x.sentAt)}</td>
+        <td><b>${esc(x.deviceName)}</b></td>
+        <td><span class="pill ${x.status === "active" ? "sos" : "resolved"}">${esc(x.status)}</span></td>
+        <td>${esc(x.battery)}%</td>
+        <td>${loc}</td>
+      </tr>`;
+    }).join("");
+    $("alerts").innerHTML = rows
+      ? `<table><tr><th>Time</th><th>Cane</th><th>Status</th><th>Battery</th><th>Location</th></tr>${rows}</table>`
+      : '<div class="muted">No alerts.</div>';
+  }, (e) => $("alerts").innerHTML = `<div class="muted">${esc(e.message)}</div>`));
+
+  /* ---- accounts (admin only) ---- */
+  if (isAdmin) {
+    unsubs.push(onSnapshot(collection(db, "users"), (snap) => {
+      const rows = snap.docs.map((d) => {
+        const x = d.data();
+        return `<tr>
+          <td><b>${esc(x.name || "—")}</b>${x.isAdmin ? ' <span class="pill role">admin</span>' : ""}</td>
+          <td>${esc(x.email || "—")}</td>
+          <td class="muted">${esc(d.id)}</td>
+        </tr>`;
+      }).join("");
+      $("users").innerHTML = rows
+        ? `<table><tr><th>Name</th><th>Email</th><th>UID</th></tr>${rows}</table>`
+        : '<div class="muted">No accounts.</div>';
+    }, (e) => $("users").innerHTML = `<div class="muted">${esc(e.message)}</div>`));
+  }
+});
+</script>
+</body>
+</html>

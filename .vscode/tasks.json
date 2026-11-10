@@ -1,0 +1,172 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "backend: functions emulator",
+      "type": "shell",
+      "command": "firebase emulators:start --only functions",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always" }
+    },
+    {
+      "label": "android: start emulator",
+      "type": "shell",
+      "command": "$ANDROID_HOME/emulator/emulator -avd truepath -no-snapshot-save",
+      "options": {
+        "env": { "ANDROID_HOME": "/opt/homebrew/share/android-commandlinetools" }
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "silent" }
+    },
+    {
+      "label": "web: serve fleet site",
+      "type": "shell",
+      "command": "python3 -m http.server 8787 -d web",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "silent" }
+    },
+    {
+      "label": "start everything (backend + android + web)",
+      "dependsOn": [
+        "backend: functions emulator",
+        "android: start emulator",
+        "web: serve fleet site"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "seed demo data",
+      "type": "shell",
+      "command": "node scripts/seed.mjs",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "provision new cane",
+      "type": "shell",
+      "command": "node scripts/provision.mjs \"${input:caneName}\"",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "simulator: fire SOS (demo cane)",
+      "type": "shell",
+      "command": "node simulator/sos.mjs",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "simulator: fire SOS (choose cane)",
+      "type": "shell",
+      "command": "node simulator/sos.mjs --cane ${input:caneId} --battery ${input:battery}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "simulator: negative test (wrong secret)",
+      "type": "shell",
+      "command": "node simulator/sos.mjs --secret WRONG",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "make website admin",
+      "type": "shell",
+      "command": "node scripts/make-admin.mjs ${input:email}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "app: build debug APK",
+      "type": "shell",
+      "command": "flutter build apk --debug",
+      "options": {
+        "cwd": "${workspaceFolder}/app",
+        "env": { "JAVA_TOOL_OPTIONS": "-Djava.net.preferIPv4Stack=true" }
+      },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "app: install APK on emulator",
+      "type": "shell",
+      "command": "$ANDROID_HOME/platform-tools/adb install -r app/build/app/outputs/flutter-apk/app-debug.apk",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": { "ANDROID_HOME": "/opt/homebrew/share/android-commandlinetools" }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "app: flutter analyze",
+      "type": "shell",
+      "command": "flutter analyze",
+      "options": { "cwd": "${workspaceFolder}/app" },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "app: build release APK",
+      "type": "shell",
+      "command": "flutter build apk --release",
+      "options": {
+        "cwd": "${workspaceFolder}/app",
+        "env": { "JAVA_TOOL_OPTIONS": "-Djava.net.preferIPv4Stack=true" }
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "app: distribute to Firebase testers",
+      "type": "shell",
+      "command": "firebase appdistribution:distribute app/build/app/outputs/flutter-apk/app-release.apk --app 1:715122591091:android:c030054f52092d393a3106 --project truepath-sos-2611 --groups testers --release-notes \"${input:releaseNotes}\"",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "deploy firestore rules + indexes",
+      "type": "shell",
+      "command": "firebase deploy --only firestore --project truepath-sos-2611",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "caneName",
+      "type": "promptString",
+      "description": "Name for the new cane",
+      "default": "New cane"
+    },
+    {
+      "id": "caneId",
+      "type": "promptString",
+      "description": "Device ID (e.g. cane-255fde) — must have a simulator/<id>.json",
+      "default": "cane-255fde"
+    },
+    {
+      "id": "battery",
+      "type": "promptString",
+      "description": "Battery percentage to report",
+      "default": "78"
+    },
+    {
+      "id": "email",
+      "type": "promptString",
+      "description": "Account email to grant website admin",
+      "default": "demo@truepath.app"
+    },
+    {
+      "id": "releaseNotes",
+      "type": "promptString",
+      "description": "Release notes for this build",
+      "default": "Dev build"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "715122591091",
+    "project_id": "truepath-sos-2611",
+    "storage_bucket": "truepath-sos-2611.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:715122591091:android:c030054f52092d393a3106",
+        "android_client_info": {
+          "package_name": "app.truepath.truepath_care"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAzSgwDGULp6o5zc7OikZls_t4sCt3jWNQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

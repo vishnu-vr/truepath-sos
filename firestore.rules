@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    // Each person manages only their own profile (name, email, fcmTokens).
+    // Other people's info is read via the denormalized members map on devices.
+    match /users/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Canes: readable by their owner, caregivers, cane user, and admins.
+    // All writes go through the backend (claim/manage/provision/sos).
+    match /devices/{deviceId} {
+      allow read: if isAdmin()
+        || (signedIn()
+            && (request.auth.uid == resource.data.ownerUid
+                || request.auth.uid in resource.data.caregiverUids
+                || request.auth.uid == resource.data.caneUserUid));
+      allow write: if false;
+    }
+
+    // Alerts: readable by everyone on the cane; only caregivers may resolve.
+    // Creation happens via the backend (sos endpoint) only.
+    match /alerts/{alertId} {
+      allow read: if isAdmin()
+        || (signedIn() && request.auth.uid in resource.data.memberUids);
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.caregiverUids
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'resolvedAt', 'resolvedBy'])
+        && request.resource.data.status in ['active', 'resolved'];
+      allow create, delete: if false;
+    }
+  }
+}

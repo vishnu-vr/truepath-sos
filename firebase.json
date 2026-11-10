@@ -1,0 +1,23 @@
+{
+  "functions": {
+    "source": "functions",
+    "codebase": "default"
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "hosting": {
+    "public": "web",
+    "ignore": ["firebase.json", "**/.*"]
+  },
+  "emulators": {
+    "functions": {
+      "port": 15002
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
+}
