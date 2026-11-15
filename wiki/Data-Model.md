@@ -22,8 +22,19 @@ primaryCaregiverUid,        // transferable; falls back to owner on removal
 caregiverUids: string[],    // all receive SOS pushes; owner always included
 caneUserUid,                // nullable
 members: { uid: {name, email} },   // denormalized display info
-battery, lastSeenAt, provisionedAt, claimedAt
+battery, batteryAt,         // live battery + when it was reported
+lastLocation: GeoPoint,     // live position (heartbeat, SOS, or mock)
+lastLocationAt,
+lastSeenAt, provisionedAt, claimedAt
 ```
+
+### `devices/{deviceId}/locations/{autoId}` — 24-hour trail
+```
+location: GeoPoint, battery, at: Timestamp, simulated: bool
+```
+Written only by the backend's `recordLocation` (from `/location`, `/sos`,
+`/mockSos`, `/mockLocation`). Points older than 24 h are pruned on each write.
+Readable by anyone who can read the parent cane (rules `get()` on the device).
 `members` exists so clients never need to read other people's `users` docs
 (privacy). The backend recomputes it on every membership change.
 
@@ -41,6 +52,8 @@ location: GeoPoint, battery, sentAt, createdAt, resolvedAt, resolvedBy
 - `users/{uid}` — read/write only by that user; admins may read.
 - `devices` — read by owner/caregivers/cane user/admin; **no client writes**
   (claim/manage/provision/sos go through the backend Admin SDK).
+- `devices/{id}/locations` — same readers as the parent cane (via
+  `isCaneMember()`, a rules `get()` on the device); no client writes.
 - `alerts` — read by `memberUids` members or admin; the ONLY client write in
   the whole database is an update restricted to
   `status/resolvedAt/resolvedBy` by someone in `caregiverUids`.

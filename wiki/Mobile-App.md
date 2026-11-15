@@ -15,6 +15,7 @@ Android emulator).
 | `lib/screens/auth_screen.dart` | sign in / create account (creates `users/{uid}` doc) |
 | `lib/screens/home_screen.dart` | tabs: Alerts (active + history, live query on `memberUids`) and My canes (two queries: caregiver-of, cane-user-of); FAB → ClaimScreen |
 | `lib/screens/claim_screen.dart` | QR scan (mobile_scanner) or manual claim-code entry → `/claim` |
+| `lib/widgets/live_location_card.dart` | live map (flutter_map + OSM tiles, `userAgentPackageName` set per OSM policy), marker at `lastLocation`, 24 h trail polyline from `devices/{id}/locations`, follows new positions; battery icon coloured by level with "updated x ago"; Open in Maps |
 | `lib/screens/cane_screen.dart` | cane status + people with Owner/Primary/Cane-user badges; owner/primary get add/remove/make-primary/link/rename via `/manage` |
 | `lib/screens/alert_detail_screen.dart` | SOS screen: name/time/location/battery/status, Open in Maps, Mark Resolved (shown to caregivers only) |
 

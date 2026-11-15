@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../api.dart';
+import '../widgets/live_location_card.dart';
 
 /// One cane: status, battery, people. The owner and the primary caregiver
 /// can add/remove caregivers, transfer primary, link the cane user's
@@ -61,11 +62,12 @@ class CaneScreen extends StatelessWidget {
                   ]),
                   subtitle: Text(
                     'Status: ${data['status'] ?? '?'}'
-                    '${data['battery'] != null ? ' · battery ${data['battery']}%' : ''}'
                     '${lastSeen != null ? '\nLast seen ${DateFormat('d MMM, h:mm a').format(lastSeen)}' : ''}',
                   ),
                 ),
               ),
+              const SizedBox(height: 8),
+              LiveLocationCard(deviceId: deviceId, device: data),
               const SizedBox(height: 16),
               Text('PEOPLE',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(

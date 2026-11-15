@@ -4,15 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TruePath Fleet</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   :root {
     --bg: #fdf7f5; --card: #ffffff; --ink: #2b1a17; --muted: #8a7570;
     --brand: #b03a2e; --brand-soft: #f7e3e0; --ok: #2e7d32; --line: #eadcd8;
+    --warn: #c77700; --bad: #c62828;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #1c1412; --card: #261c19; --ink: #f3e9e6; --muted: #a78f89;
       --brand: #e57368; --brand-soft: #3a2420; --ok: #81c784; --line: #3a2d29;
+      --warn: #ffb74d; --bad: #ef5350;
     }
   }
   * { box-sizing: border-box; }
@@ -23,7 +27,7 @@
   header {
     display: flex; align-items: center; gap: 12px; padding: 14px 20px;
     border-bottom: 1px solid var(--line); background: var(--card);
-    position: sticky; top: 0;
+    position: sticky; top: 0; z-index: 1000;
   }
   header h1 { font-size: 18px; margin: 0; flex: 1; }
   header h1 small { color: var(--muted); font-weight: normal; }
@@ -32,6 +36,7 @@
     background: var(--card); border: 1px solid var(--line);
     border-radius: 14px; padding: 18px; margin-bottom: 20px;
   }
+  .table-scroll { overflow-x: auto; }
   h2 { font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase;
        color: var(--muted); margin: 0 0 12px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -39,6 +44,8 @@
        padding: 6px 10px; border-bottom: 1px solid var(--line); }
   td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   tr:last-child td { border-bottom: none; }
+  tr.cane-row { cursor: pointer; }
+  tr.cane-row:hover td, tr.cane-row.selected td { background: var(--brand-soft); }
   .pill { display: inline-block; padding: 2px 10px; border-radius: 999px;
           font-size: 12px; font-weight: 600; }
   .pill.active { background: var(--brand-soft); color: var(--brand); }
@@ -47,17 +54,22 @@
   .pill.resolved { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
   .pill.role { background: var(--line); color: var(--muted); font-weight: 500; }
   .pill.test { background: var(--line); color: var(--muted); }
+  .batt { font-weight: 600; white-space: nowrap; }
+  .batt::before { content: "●"; margin-right: 5px; }
+  .batt.ok { color: var(--ok); } .batt.warn { color: var(--warn); } .batt.bad { color: var(--bad); }
+  .batt.unknown { color: var(--muted); }
   button.mini {
     padding: 5px 12px; font-size: 13px; border-radius: 8px;
     background: var(--brand-soft); color: var(--brand); font-weight: 600;
   }
-  button.mini:disabled { opacity: 0.6; cursor: default; }
+  button:disabled { opacity: 0.55; cursor: default; }
   .muted { color: var(--muted); font-size: 13px; }
   button {
     background: var(--brand); color: #fff; border: 0; border-radius: 10px;
     padding: 10px 18px; font-size: 15px; cursor: pointer;
   }
   button.ghost { background: transparent; color: var(--brand); }
+  button.outline { background: transparent; color: var(--brand); border: 1px solid var(--brand); }
   input {
     width: 100%; padding: 10px 12px; margin-bottom: 10px; font-size: 15px;
     border: 1px solid var(--line); border-radius: 10px;
@@ -66,7 +78,26 @@
   #login { max-width: 360px; margin: 10vh auto; }
   #err { color: var(--brand); min-height: 1.2em; font-size: 14px; }
   a { color: var(--brand); }
-  .hidden { display: none; }
+  .hidden { display: none !important; }
+  #fleetMap { height: 380px; border-radius: 10px; }
+  .map-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+
+  /* Admin test panel (modal) */
+  #testPanel {
+    position: fixed; inset: 0; z-index: 2000; background: rgb(0 0 0 / 0.55);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  #testPanel .card { width: min(820px, 100%); max-height: 100%; overflow: auto; margin: 0; }
+  #testMap { height: 360px; border-radius: 10px; margin-bottom: 12px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tabs button { flex: 1; }
+  .tabs button.on { background: var(--brand); color: #fff; }
+  .tabs button:not(.on) { background: var(--brand-soft); color: var(--brand); }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .grid3 label { font-size: 12px; color: var(--muted); }
+  .row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #testStatus { margin-top: 10px; min-height: 1.4em; font-size: 14px; }
+  @media (max-width: 560px) { .grid3 { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
 <body>
@@ -86,9 +117,46 @@
   </div>
 
   <div id="dash" class="hidden">
-    <div class="card"><h2 id="canes-title">Canes</h2><div id="canes"></div></div>
-    <div class="card"><h2>Recent alerts</h2><div id="alerts"></div></div>
-    <div class="card hidden" id="users-card"><h2>Accounts</h2><div id="users"></div></div>
+    <div class="card">
+      <div class="map-head">
+        <h2>Live map</h2>
+        <span class="muted" id="map-hint">Click a cane below to see its 24-hour trail</span>
+      </div>
+      <div id="fleetMap"></div>
+    </div>
+    <div class="card"><h2 id="canes-title">Canes</h2><div id="canes" class="table-scroll"></div></div>
+    <div class="card"><h2>Recent alerts</h2><div id="alerts" class="table-scroll"></div></div>
+    <div class="card hidden" id="users-card"><h2>Accounts</h2><div id="users" class="table-scroll"></div></div>
+  </div>
+</div>
+
+<!-- Admin test panel -->
+<div id="testPanel" class="hidden">
+  <div class="card">
+    <div class="map-head">
+      <h2 id="testTitle">Test</h2>
+      <button class="ghost" id="testClose">Close ✕</button>
+    </div>
+    <div class="tabs">
+      <button id="modeSos" class="on">🆘 Test SOS at a spot</button>
+      <button id="modeWalk">🚶 Simulate a walk</button>
+    </div>
+    <div class="muted" id="testHelp" style="margin-bottom:8px"></div>
+    <div id="testMap"></div>
+    <div class="grid3">
+      <div><label>Latitude</label><input id="tLat" type="number" step="0.00001"></div>
+      <div><label>Longitude</label><input id="tLng" type="number" step="0.00001"></div>
+      <div><label>Battery %</label><input id="tBattery" type="number" min="0" max="100" value="78"></div>
+    </div>
+    <div class="row-actions" id="sosActions">
+      <button id="fireSos">Fire test SOS here</button>
+    </div>
+    <div class="row-actions hidden" id="walkActions">
+      <button id="walkStart">Start walk</button>
+      <button class="outline" id="walkStop" disabled>Stop</button>
+      <button class="ghost" id="walkClear">Clear waypoints</button>
+    </div>
+    <div id="testStatus" class="muted"></div>
   </div>
 </div>
 
@@ -98,7 +166,7 @@ import {
   getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
-  getFirestore, collection, query, where, orderBy, limit, onSnapshot
+  getFirestore, collection, query, where, orderBy, limit, onSnapshot, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const app = initializeApp({
@@ -111,36 +179,285 @@ const app = initializeApp({
 const auth = getAuth(app);
 const db = getFirestore(app);
 const BACKEND = "https://us-central1-truepath-sos-2611.cloudfunctions.net";
+const KOCHI = [9.9816, 76.2999];
+const TRAIL_HOURS = 24;
 
-/** Admin demo helper: fire a simulated SOS for a cane via the backend. */
-window.fireTestSos = async (deviceId, btn) => {
-  const original = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "sending…";
-  try {
-    const token = await auth.currentUser.getIdToken();
-    const res = await fetch(`${BACKEND}/mockSos`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ deviceId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.status);
-    btn.textContent = `sent ✓ (push: ${data.pushSent})`;
-  } catch (e) {
-    btn.textContent = `failed: ${String(e.message).slice(0, 40)}`;
-  }
-  setTimeout(() => {
-    btn.textContent = original;
-    btn.disabled = false;
-  }, 4000);
-};
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (ts) => ts?.toDate ? ts.toDate().toLocaleString() : "—";
+function ago(ts) {
+  if (!ts?.toDate) return "";
+  const s = (Date.now() - ts.toDate().getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+const battClass = (b) => b == null ? "unknown" : b < 20 ? "bad" : b < 50 ? "warn" : "ok";
+const battColor = (b) => ({ ok: "#2e7d32", warn: "#c77700", bad: "#c62828", unknown: "#8a7570" })[battClass(b)];
+
+async function callBackend(path, body) {
+  const token = await auth.currentUser.getIdToken();
+  const res = await fetch(`${BACKEND}/${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function osmLayer() {
+  return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  });
+}
+
+/* ------------------------------------------------------------ fleet map */
+
+let fleetMap = null;
+const caneDocs = new Map();     // deviceId -> live device snapshot
+const caneMarkers = new Map();
+let fitted = false;
+let trailLine = null;
+let trailUnsub = null;
+let selectedCane = null;
+
+function ensureFleetMap() {
+  if (fleetMap) return;
+  fleetMap = L.map("fleetMap").setView(KOCHI, 13);
+  osmLayer().addTo(fleetMap);
+}
+
+function updateMarkers(docsById) {
+  const seen = new Set();
+  for (const [id, d] of docsById) {
+    const x = d.data();
+    if (!x.lastLocation) continue;
+    seen.add(id);
+    const ll = [x.lastLocation.latitude, x.lastLocation.longitude];
+    const popup = `<b>${esc(x.name)}</b><br>${esc(id)}<br>Battery: ${x.battery ?? "?"}%<br>` +
+      `<span style="color:#888">${esc(ago(x.lastLocationAt) || fmt(x.lastLocationAt))}</span>`;
+    let m = caneMarkers.get(id);
+    if (!m) {
+      m = L.circleMarker(ll, { radius: 10, weight: 3, color: "#fff", fillOpacity: 1 })
+        .addTo(fleetMap)
+        .bindTooltip(esc(x.name), { permanent: true, direction: "top", offset: [0, -10] });
+      m.on("click", () => selectCane(id));
+      caneMarkers.set(id, m);
+    }
+    m.setLatLng(ll).setStyle({ fillColor: battColor(x.battery) }).bindPopup(popup);
+  }
+  for (const [id, m] of caneMarkers) {
+    if (!seen.has(id)) { m.remove(); caneMarkers.delete(id); }
+  }
+  if (!fitted && caneMarkers.size) {
+    fitted = true;
+    const b = L.latLngBounds([...caneMarkers.values()].map((m) => m.getLatLng()));
+    fleetMap.fitBounds(b.pad(0.3), { maxZoom: 16 });
+  }
+}
+
+function selectCane(id) {
+  selectedCane = id;
+  document.querySelectorAll("tr.cane-row").forEach((r) =>
+    r.classList.toggle("selected", r.dataset.id === id));
+  trailUnsub?.();
+  trailLine?.remove();
+  trailLine = null;
+  const since = Timestamp.fromMillis(Date.now() - TRAIL_HOURS * 3600 * 1000);
+  trailUnsub = onSnapshot(
+    query(collection(db, "devices", id, "locations"), where("at", ">", since), orderBy("at")),
+    (snap) => {
+      const pts = snap.docs.map((d) => d.data().location)
+        .filter(Boolean).map((g) => [g.latitude, g.longitude]);
+      trailLine?.remove();
+      trailLine = pts.length > 1
+        ? L.polyline(pts, { color: "#b03a2e", weight: 4, opacity: 0.7 }).addTo(fleetMap)
+        : null;
+      const m = caneMarkers.get(id);
+      if (m) fleetMap.panTo(m.getLatLng());
+      $("map-hint").textContent = pts.length
+        ? `Showing ${pts.length} point${pts.length === 1 ? "" : "s"} from the last 24 hours`
+        : "No trail in the last 24 hours";
+    },
+    (e) => $("map-hint").textContent = e.message,
+  );
+  const m = caneMarkers.get(id);
+  if (m) { fleetMap.setView(m.getLatLng(), Math.max(fleetMap.getZoom(), 15)); m.openPopup(); }
+}
+window.selectCane = selectCane;
+
+/* -------------------------------------------------------- test panel */
+
+let testMap = null;
+let testCane = null;
+let testMode = "sos";
+let sosMarker = null;
+let waypoints = [];
+let walkLine = null;
+let walkMarkers = [];
+let walking = false;
+
+function setPoint(lat, lng) {
+  $("tLat").value = lat.toFixed(5);
+  $("tLng").value = lng.toFixed(5);
+}
+
+function setMode(mode) {
+  testMode = mode;
+  $("modeSos").classList.toggle("on", mode === "sos");
+  $("modeWalk").classList.toggle("on", mode === "walk");
+  $("sosActions").classList.toggle("hidden", mode !== "sos");
+  $("walkActions").classList.toggle("hidden", mode !== "walk");
+  $("testHelp").textContent = mode === "sos"
+    ? "Click the map to choose where the SOS happens (or type exact coordinates)."
+    : "Click the map to add waypoints in order, then Start. The cane moves along the path every 2 seconds.";
+  sosMarker?.setOpacity(mode === "sos" ? 1 : 0);
+}
+
+function redrawWalk() {
+  walkLine?.remove();
+  walkMarkers.forEach((m) => m.remove());
+  walkMarkers = waypoints.map((p, i) =>
+    L.circleMarker(p, { radius: 6, color: "#b03a2e", fillOpacity: 1 })
+      .bindTooltip(String(i + 1), { permanent: true, direction: "right" }).addTo(testMap));
+  walkLine = waypoints.length > 1
+    ? L.polyline(waypoints, { color: "#b03a2e", dashArray: "6 6" }).addTo(testMap)
+    : null;
+  $("walkStart").disabled = waypoints.length < 2 || walking;
+}
+
+window.openTest = (deviceId) => {
+  const x = caneDocs.get(deviceId)?.data();
+  if (!x) return;
+  const name = x.name || deviceId;
+  const lat = x.lastLocation?.latitude ?? null;
+  const lng = x.lastLocation?.longitude ?? null;
+  const battery = x.battery;
+  testCane = deviceId;
+  $("testTitle").textContent = `Test · ${name} (${deviceId})`;
+  $("testStatus").textContent = "";
+  $("tBattery").value = battery ?? 78;
+  $("testPanel").classList.remove("hidden");
+  const start = lat != null ? [lat, lng] : KOCHI;
+  if (!testMap) {
+    testMap = L.map("testMap");
+    osmLayer().addTo(testMap);
+    testMap.on("click", (e) => {
+      if (walking) return;
+      const { lat, lng } = e.latlng;
+      setPoint(lat, lng);
+      if (testMode === "sos") {
+        sosMarker = sosMarker ? sosMarker.setLatLng(e.latlng) : L.marker(e.latlng).addTo(testMap);
+      } else {
+        waypoints.push([lat, lng]);
+        redrawWalk();
+      }
+    });
+  }
+  testMap.setView(start, 16);
+  setTimeout(() => testMap.invalidateSize(), 50);
+  sosMarker?.remove(); sosMarker = L.marker(start).addTo(testMap);
+  setPoint(start[0], start[1]);
+  waypoints = []; redrawWalk();
+  setMode("sos");
+};
+
+function closeTest() {
+  walking = false;
+  $("testPanel").classList.add("hidden");
+}
+$("testClose").onclick = closeTest;
+$("testPanel").addEventListener("click", (e) => { if (e.target.id === "testPanel") closeTest(); });
+$("modeSos").onclick = () => setMode("sos");
+$("modeWalk").onclick = () => setMode("walk");
+for (const id of ["tLat", "tLng"]) {
+  $(id).addEventListener("change", () => {
+    const lat = Number($("tLat").value), lng = Number($("tLng").value);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && testMode === "sos" && sosMarker) {
+      sosMarker.setLatLng([lat, lng]);
+      testMap.panTo([lat, lng]);
+    }
+  });
+}
+const battery = () => {
+  const b = Number($("tBattery").value);
+  return Number.isFinite(b) ? Math.min(100, Math.max(0, Math.round(b))) : undefined;
+};
+
+$("fireSos").onclick = async () => {
+  const lat = Number($("tLat").value), lng = Number($("tLng").value);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    $("testStatus").textContent = "Pick a point on the map first.";
+    return;
+  }
+  $("fireSos").disabled = true;
+  $("testStatus").textContent = "Sending test SOS…";
+  try {
+    const r = await callBackend("mockSos", { deviceId: testCane, lat, lng, battery: battery() });
+    $("testStatus").textContent =
+      `✓ Test SOS sent at ${lat.toFixed(5)}, ${lng.toFixed(5)}. Push delivered to ${r.pushSent} device(s).`;
+  } catch (e) {
+    $("testStatus").textContent = `Failed: ${e.message}`;
+  }
+  $("fireSos").disabled = false;
+};
+
+/** Points about stepMeters apart along the waypoint path. */
+function interpolate(route, stepMeters = 15) {
+  const pts = [];
+  for (let i = 0; i < route.length - 1; i++) {
+    const [aLat, aLng] = route[i], [bLat, bLng] = route[i + 1];
+    const dy = (bLat - aLat) * 111320;
+    const dx = (bLng - aLng) * 111320 * Math.cos(aLat * Math.PI / 180);
+    const steps = Math.max(1, Math.round(Math.hypot(dx, dy) / stepMeters));
+    for (let s = 0; s < steps; s++) {
+      pts.push([aLat + (bLat - aLat) * s / steps, aLng + (bLng - aLng) * s / steps]);
+    }
+  }
+  pts.push(route[route.length - 1]);
+  return pts;
+}
+
+$("walkStart").onclick = async () => {
+  const pts = interpolate(waypoints);
+  let b = battery() ?? 78;
+  walking = true;
+  $("walkStart").disabled = true; $("walkStop").disabled = false; $("walkClear").disabled = true;
+  const walker = L.circleMarker(pts[0], { radius: 9, color: "#fff", weight: 3, fillColor: "#b03a2e", fillOpacity: 1 }).addTo(testMap);
+  for (let i = 0; i < pts.length && walking; i++) {
+    if (i > 0 && i % 10 === 0) b = Math.max(0, b - 1);
+    walker.setLatLng(pts[i]);
+    setPoint(pts[i][0], pts[i][1]);
+    $("tBattery").value = b;
+    try {
+      await callBackend("mockLocation", { deviceId: testCane, lat: pts[i][0], lng: pts[i][1], battery: b });
+      $("testStatus").textContent = `🚶 Step ${i + 1} of ${pts.length} sent · battery ${b}%`;
+    } catch (e) {
+      $("testStatus").textContent = `Stopped: ${e.message}`;
+      break;
+    }
+    if (i < pts.length - 1 && walking) await new Promise((r) => setTimeout(r, 2000));
+  }
+  const finished = walking;
+  walking = false;
+  walker.remove();
+  $("walkStop").disabled = true; $("walkClear").disabled = false;
+  redrawWalk();
+  if (finished) $("testStatus").textContent += " · walk complete ✓";
+};
+$("walkStop").onclick = () => {
+  walking = false;
+  $("testStatus").textContent += " · stopped";
+};
+$("walkClear").onclick = () => { waypoints = []; redrawWalk(); };
+
+/* ----------------------------------------------------------- auth + data */
+
 let unsubs = [];
 
 $("signin").onclick = async () => {
@@ -157,6 +474,12 @@ $("signout").onclick = () => signOut(auth);
 onAuthStateChanged(auth, async (user) => {
   unsubs.forEach((u) => u());
   unsubs = [];
+  trailUnsub?.(); trailUnsub = null;
+  trailLine?.remove(); trailLine = null;
+  caneMarkers.forEach((m) => m.remove()); caneMarkers.clear();
+  fitted = false; selectedCane = null;
+  $("map-hint").textContent = "Click a cane below to see its 24-hour trail";
+  closeTest();
   if (!user) {
     $("login").classList.remove("hidden");
     $("dash").classList.add("hidden");
@@ -171,8 +494,8 @@ onAuthStateChanged(auth, async (user) => {
   $("mode").textContent = isAdmin ? "· admin" : "· my canes";
   $("canes-title").textContent = isAdmin ? "All canes" : "My canes";
   $("users-card").classList.toggle("hidden", !isAdmin);
-
-  const fmt = (ts) => ts?.toDate ? ts.toDate().toLocaleString() : "—";
+  ensureFleetMap();
+  setTimeout(() => fleetMap.invalidateSize(), 50);
 
   /* ---- canes ---- */
   const renderCanes = (docsById) => {
@@ -186,24 +509,31 @@ onAuthStateChanged(auth, async (user) => {
         ].filter(Boolean).join(", ");
         return `${esc(m.name)}${roles ? ` <span class="pill role">${roles}</span>` : ""}`;
       }).join("<br>");
+      const ll = x.lastLocation;
       const actions = isAdmin && x.status === "active"
-        ? `<button class="mini" onclick="fireTestSos('${esc(d.id)}', this)">🧪 Test SOS</button>`
+        ? `<button class="mini" onclick="event.stopPropagation(); openTest('${esc(d.id)}')">🧪 Test…</button>`
         : "";
-      return `<tr>
+      const battAge = ago(x.batteryAt || x.lastSeenAt);
+      const locCell = ll
+        ? `${ll.latitude.toFixed(4)}, ${ll.longitude.toFixed(4)}<br><span class="muted">${esc(ago(x.lastLocationAt))}</span>`
+        : '<span class="muted">no fix yet</span>';
+      return `<tr class="cane-row${d.id === selectedCane ? " selected" : ""}" data-id="${esc(d.id)}" onclick="selectCane('${esc(d.id)}')">
         <td><b>${esc(x.name)}</b><br><span class="muted">${esc(d.id)}</span></td>
         <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span></td>
-        <td>${x.battery != null ? esc(x.battery) + "%" : "—"}<br>
-            <span class="muted">${fmt(x.lastSeenAt)}</span></td>
+        <td><span class="batt ${battClass(x.battery)}">${x.battery != null ? esc(x.battery) + "%" : "—"}</span><br>
+            <span class="muted">${esc(battAge)}</span></td>
+        <td>${locCell}</td>
         <td>${people || '<span class="muted">unclaimed</span>'}</td>
         ${isAdmin ? `<td>${actions}</td>` : ""}
       </tr>`;
     }).join("");
     $("canes").innerHTML = rows
-      ? `<table><tr><th>Cane</th><th>Status</th><th>Battery · last seen</th><th>People</th>${isAdmin ? "<th></th>" : ""}</tr>${rows}</table>`
+      ? `<table><tr><th>Cane</th><th>Status</th><th>Battery</th><th>Live location</th><th>People</th>${isAdmin ? "<th></th>" : ""}</tr>${rows}</table>`
       : '<div class="muted">No canes.</div>';
+    updateMarkers(docsById);
   };
 
-  const caneDocs = new Map();
+  caneDocs.clear();
   const watchCanes = (q) => unsubs.push(onSnapshot(q, (snap) => {
     snap.docChanges().forEach((ch) =>
       ch.type === "removed" ? caneDocs.delete(ch.doc.id) : caneDocs.set(ch.doc.id, ch.doc));
@@ -216,6 +546,9 @@ onAuthStateChanged(auth, async (user) => {
     watchCanes(query(collection(db, "devices"), where("caneUserUid", "==", user.uid)));
     watchCanes(query(collection(db, "devices"), where("ownerUid", "==", user.uid)));
   }
+  // Keep "x min ago" labels fresh.
+  const tick = setInterval(() => renderCanes(caneDocs), 30000);
+  unsubs.push(() => clearInterval(tick));
 
   /* ---- alerts ---- */
   const alertsQ = isAdmin

@@ -25,6 +25,20 @@ service cloud.firestore {
                 || request.auth.uid in resource.data.caregiverUids
                 || request.auth.uid == resource.data.caneUserUid));
       allow write: if false;
+
+      // Live-location trail: readable by whoever can read the cane itself.
+      // Written only by the backend (location heartbeat / SOS / mocks).
+      match /locations/{locId} {
+        allow read: if isAdmin() || (signedIn() && isCaneMember(deviceId));
+        allow write: if false;
+      }
+    }
+
+    function isCaneMember(deviceId) {
+      let d = get(/databases/$(database)/documents/devices/$(deviceId)).data;
+      return request.auth.uid == d.ownerUid
+        || request.auth.uid in d.caregiverUids
+        || request.auth.uid == d.caneUserUid;
     }
 
     // Alerts: readable by everyone on the cane; only caregivers may resolve.

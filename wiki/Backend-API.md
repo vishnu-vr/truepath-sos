@@ -21,6 +21,26 @@ JSON POST. Human endpoints require `Authorization: Bearer <Firebase ID token>`.
 - Side effects: creates `alerts` doc (denormalized `deviceName`,
   `caregiverUids`, `memberUids`), updates device `battery`/`lastSeenAt`.
 
+## POST /location — device heartbeat (live location + battery)
+
+Same device-secret auth as `/sos`; the firmware sends it every few minutes.
+```json
+{ "deviceId": "cane-001", "secretToken": "...", "lat": 9.98, "lng": 76.29, "battery": 66,
+  "timestamp": "2026-11-15T09:00:00Z" }        // timestamp optional
+```
+- 200 `{ok}` · 400 bad shape · 401 unknown device / wrong secret · 409 not claimed.
+- Side effects (shared `recordLocation`, also run by every SOS and mock):
+  device `lastLocation`, `lastLocationAt`, `battery`, `batteryAt`, `lastSeenAt`;
+  appends a point to `devices/{id}/locations`; prunes points older than 24 h
+  (≤50 per call).
+
+## POST /mockLocation — admin demo ping
+
+Admin ID token required. `{deviceId, lat, lng, battery?}` → same
+`recordLocation` with `simulated: true`. The website's "Simulate walk" calls
+it once per step. 401 no token · 403 not admin · 404 unknown cane · 409 not
+claimed.
+
 ## POST /claim — unboxing
 
 ```json

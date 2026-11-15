@@ -31,10 +31,34 @@ Decided by the `admin` custom claim on the signed-in account
 The scoping is enforced by Firestore security rules, not just the UI — a
 non-admin running the admin queries gets permission errors.
 
-Admins also get a **🧪 Test SOS** button on each active cane: it calls the
-backend's `/mockSos` with the admin's ID token, firing the real alert + push
-pipeline (alert tagged `test` in the alerts table, push titled "(test)").
-Great for demos — no simulator or terminal needed.
+## Live map and battery
+
+Leaflet 1.9.4 (cdnjs) with OpenStreetMap tiles, no API key. The **Live map**
+card shows one marker per visible cane at `lastLocation`, coloured by battery
+(green ≥50%, amber ≥20%, red below), with a popup. Clicking a cane row (or
+marker) draws its 24-hour trail from `devices/{id}/locations`, live. The canes
+table shows live battery with its age and the live location.
+
+## Admin test panel (🧪 Test… on each active cane)
+
+- **Test SOS at a spot**: click the map (or type lat/lng), set battery, and
+  fire `/mockSos` there. The full alert + push pipeline runs (alert tagged
+  `test`, push titled "(test)").
+- **Simulate a walk**: click waypoints in order, then Start. The page
+  interpolates points about 15 m apart and calls `/mockLocation` every 2 s,
+  dropping battery 1% every 10 steps. Stop ends it. The cane moves live on
+  this page and in the app.
+
+Implementation note: row buttons pass only the cane ID (`openTest(id)`); the
+panel reads the rest from the live `caneDocs` map. Don't inline names into
+`onclick` attributes, because HTML-decoding turns `&#39;` back into `'` and
+breaks the JS.
+
+## Caching
+
+`firebase.json` serves HTML with `Cache-Control: no-cache`, so a hosting
+deploy is visible on the next page load (Hosting's default lets browsers
+cache pages for an hour).
 
 ## Notes
 

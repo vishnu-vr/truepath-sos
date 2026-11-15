@@ -76,43 +76,161 @@ async function memberInfo(uid) {
 
 /* ------------------------------------------------------------------ SOS */
 
-exports.sos = onRequest({ region: REGION, cors: true }, async (req, res) => {
-  if (!postOnly(req, res)) return;
-  const { deviceId, secretToken, type, timestamp, lat, lng, battery } = req.body || {};
-
-  const bad = (msg) => res.status(400).json({ error: msg });
+/**
+ * Validates a device request body and verifies the device secret (doc step
+ * 10). Returns { ref, device, lat, lng, battery, at } or sends the error
+ * response (400/401/409) and returns null.
+ */
+async function verifyDevice(req, res, label) {
+  const { deviceId, secretToken, timestamp, lat, lng, battery } = req.body || {};
+  const bad = (msg) => {
+    res.status(400).json({ error: msg });
+    return null;
+  };
   if (typeof deviceId !== "string" || !deviceId) return bad("deviceId required");
   if (typeof secretToken !== "string" || !secretToken) return bad("secretToken required");
-  if (typeof type !== "string" || !type) return bad("type required (e.g. 'sos')");
   if (typeof lat !== "number" || lat < -90 || lat > 90) return bad("lat must be a number in [-90, 90]");
   if (typeof lng !== "number" || lng < -180 || lng > 180) return bad("lng must be a number in [-180, 180]");
   if (typeof battery !== "number" || battery < 0 || battery > 100) return bad("battery must be 0-100");
-  const sentAt = timestamp ? new Date(timestamp) : new Date();
-  if (Number.isNaN(sentAt.getTime())) return bad("timestamp must be ISO 8601");
+  const at = timestamp ? new Date(timestamp) : new Date();
+  if (Number.isNaN(at.getTime())) return bad("timestamp must be ISO 8601");
 
-  // Verify the device (doc step 10).
-  const deviceRef = db.collection("devices").doc(deviceId);
-  const deviceSnap = await deviceRef.get();
-  if (!deviceSnap.exists) {
-    logger.warn("SOS from unknown device", { deviceId });
+  const ref = db.collection("devices").doc(deviceId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    logger.warn(`${label} from unknown device`, { deviceId });
     res.status(401).json({ error: "unknown device" });
-    return;
+    return null;
   }
-  const device = deviceSnap.data();
+  const device = snap.data();
   if (!timingSafeEqualHex(sha256(secretToken), device.secretHash)) {
-    logger.warn("SOS with bad secret", { deviceId });
+    logger.warn(`${label} with bad secret`, { deviceId });
     res.status(401).json({ error: "invalid device credentials" });
+    return null;
+  }
+  if (device.status !== "active") {
+    res.status(409).json({ error: "cane has not been claimed/activated yet" });
+    return null;
+  }
+  return { ref, device, lat, lng, battery, at };
+}
+
+exports.sos = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  if (!postOnly(req, res)) return;
+  const { type } = req.body || {};
+  if (typeof type !== "string" || !type) {
+    res.status(400).json({ error: "type required (e.g. 'sos')" });
     return;
   }
+  const v = await verifyDevice(req, res, "SOS");
+  if (!v) return;
+
+  const { alertId, pushSent } = await fireAlert(v.ref, v.device, {
+    type, sentAt: v.at, lat: v.lat, lng: v.lng, battery: v.battery, simulated: false,
+  });
+  res.status(201).json({ ok: true, alertId, pushSent });
+});
+
+/* ---------------------------------------------------- location heartbeat */
+
+const TRAIL_HOURS = 24;
+
+/**
+ * Live location + battery (shared by /location, /mockLocation, and every
+ * SOS): updates the device's latest position/battery, appends a trail point,
+ * and prunes trail points older than TRAIL_HOURS (small batch per call).
+ */
+async function recordLocation(deviceRef, { lat, lng, battery, at, simulated }) {
+  const ts = Timestamp.fromDate(at);
+  const point = new GeoPoint(lat, lng);
+  await Promise.all([
+    deviceRef.update({
+      lastLocation: point,
+      lastLocationAt: ts,
+      battery,
+      batteryAt: ts,
+      lastSeenAt: FieldValue.serverTimestamp(),
+    }),
+    deviceRef.collection("locations").add({
+      location: point,
+      battery,
+      at: ts,
+      simulated: !!simulated,
+    }),
+  ]);
+
+  const cutoff = Timestamp.fromMillis(Date.now() - TRAIL_HOURS * 3600 * 1000);
+  const old = await deviceRef
+    .collection("locations")
+    .where("at", "<", cutoff)
+    .limit(50)
+    .get();
+  if (!old.empty) {
+    const batch = db.batch();
+    old.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+}
+
+/**
+ * Device heartbeat: the cane reports its position and battery every few
+ * minutes. Authenticated with the device secret, like /sos.
+ * Body: { deviceId, secretToken, lat, lng, battery, timestamp? }
+ */
+exports.location = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  if (!postOnly(req, res)) return;
+  const v = await verifyDevice(req, res, "Location");
+  if (!v) return;
+  await recordLocation(v.ref, {
+    lat: v.lat, lng: v.lng, battery: v.battery, at: v.at, simulated: false,
+  });
+  res.json({ ok: true });
+});
+
+/**
+ * Admin-only demo: records a simulated location/battery for a cane. The
+ * website's "Simulate walk" calls this once per step.
+ * Body: { deviceId, lat, lng, battery? }
+ */
+exports.mockLocation = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  if (!postOnly(req, res)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (user.admin !== true) {
+    res.status(403).json({ error: "admin only" });
+    return;
+  }
+  const { deviceId, lat, lng, battery } = req.body || {};
+  if (typeof deviceId !== "string" || !deviceId) {
+    res.status(400).json({ error: "deviceId required" });
+    return;
+  }
+  if (typeof lat !== "number" || lat < -90 || lat > 90 ||
+      typeof lng !== "number" || lng < -180 || lng > 180) {
+    res.status(400).json({ error: "lat/lng required" });
+    return;
+  }
+  const ref = db.collection("devices").doc(deviceId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    res.status(404).json({ error: "no such cane" });
+    return;
+  }
+  const device = snap.data();
   if (device.status !== "active") {
     res.status(409).json({ error: "cane has not been claimed/activated yet" });
     return;
   }
-
-  const { alertId, pushSent } = await fireAlert(deviceRef, device, {
-    type, sentAt, lat, lng, battery, simulated: false,
+  await recordLocation(ref, {
+    lat,
+    lng,
+    battery: typeof battery === "number" && battery >= 0 && battery <= 100
+      ? battery
+      : device.battery ?? 80,
+    at: new Date(),
+    simulated: true,
   });
-  res.status(201).json({ ok: true, alertId, pushSent });
+  res.json({ ok: true });
 });
 
 /**
@@ -141,7 +259,8 @@ async function fireAlert(deviceRef, device, { type, sentAt, lat, lng, battery, s
     resolvedAt: null,
     resolvedBy: null,
   });
-  await deviceRef.update({ battery, lastSeenAt: FieldValue.serverTimestamp() });
+  // An SOS is also a location fix: keep the live map/battery current.
+  await recordLocation(deviceRef, { lat, lng, battery, at: sentAt, simulated });
 
   // Push to every caregiver's devices (doc steps 12-13).
   let sent = 0;

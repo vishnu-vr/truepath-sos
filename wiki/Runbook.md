@@ -36,6 +36,9 @@ python3 -m http.server 8787 -d web               # website  (task: "web: serve f
 | SOS from demo cane | `node simulator/sos.mjs` |
 | SOS from any cane | `node simulator/sos.mjs --cane <deviceId> [--lat --lng --battery]` |
 | Negative test (must 401) | `node simulator/sos.mjs --secret WRONG` |
+| Heartbeat (live location + battery) | `node simulator/location.mjs --cane <id> [--lat --lng --battery] [--url <prod>/location]` |
+| Walking demo from the terminal | `node simulator/location.mjs --cane <id> --walk [--interval 3] [--url <prod>/location]` |
+| Walking/SOS demo from the browser | Website → 🧪 Test… on a cane (admin) |
 | Deploy rules+indexes | `firebase deploy --only firestore --project truepath-sos-2611` |
 | Rebuild app | `cd app && JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true flutter build apk --debug` |
 | Install on emulator | `adb install -r app/build/app/outputs/flutter-apk/app-debug.apk` |
