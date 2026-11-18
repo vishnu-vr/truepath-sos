@@ -5,10 +5,12 @@ ESP32 cane (simulated by simulator/sos.mjs)
    │ HTTPS POST /sos {deviceId, secretToken, type, timestamp, lat, lng, battery}
    ▼
 Cloud Functions backend (functions/index.js)
-   │ verify secret hash → store alert → look up caregivers → FCM push
+   │ verify secret hash → store alert → look up caregivers → FCM data push
    ▼
 Firestore (project truepath-sos-2611)            FCM
-   users / devices / alerts                        │ high-priority push
+   users / devices / alerts                        │ high-priority DATA push
+                                                   │ → app raises full-screen alarm
+                                                   │ ← POST /ack ("I'm on it") → "stop" push to all
                                                    ▼
         ┌────────────────────────────┐   TruePath Care app (Flutter, app/)
         │ Fleet website (web/)       │   caregivers + cane users

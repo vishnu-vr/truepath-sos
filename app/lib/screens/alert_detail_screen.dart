@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../main.dart' show markAlertResolved;
+import '../main.dart' show acknowledgeAlert, markAlertResolved;
 
 /// Doc steps 16-19: the SOS emergency screen — user/device name, SOS time,
 /// location, battery, status, "Open in Maps", "Mark Resolved".
@@ -63,6 +63,8 @@ class AlertDetailScreen extends StatelessWidget {
           final location = data['location'] as GeoPoint?;
           final sentAt = (data['sentAt'] as Timestamp?)?.toDate();
           final resolvedAt = (data['resolvedAt'] as Timestamp?)?.toDate();
+          final ackBy = data['acknowledgedByName'] as String?;
+          final ackAt = (data['acknowledgedAt'] as Timestamp?)?.toDate();
           final fmt = DateFormat('EEEE d MMM yyyy, h:mm:ss a');
 
           return ListView(
@@ -95,6 +97,24 @@ class AlertDetailScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              if (ackBy != null) ...[
+                const SizedBox(height: 12),
+                Card(
+                  color: Colors.green.withValues(alpha: 0.12),
+                  child: ListTile(
+                    leading: const Icon(Icons.directions_run, color: Colors.green),
+                    title: Text(
+                      data['acknowledgedBy'] == uid
+                          ? 'You are handling this'
+                          : '$ackBy is handling this',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: ackAt == null
+                        ? null
+                        : Text('Responded ${DateFormat('h:mm:ss a').format(ackAt)}'),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               _InfoTile(
                 icon: Icons.person,
@@ -136,14 +156,36 @@ class AlertDetailScreen extends StatelessWidget {
                   ),
                 ),
               const SizedBox(height: 12),
+              if (active && isCaregiver && ackBy == null) ...[
+                FilledButton.icon(
+                  onPressed: () async {
+                    final err = await acknowledgeAlert(alertId);
+                    if (err != null && context.mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text(err)));
+                    }
+                  },
+                  icon: const Icon(Icons.directions_run),
+                  label: const Text("I'm on it"),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: scheme.error,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               if (active && isCaregiver)
                 OutlinedButton.icon(
                   onPressed: () async {
-                    await markAlertResolved(alertId);
+                    String msg = 'Alert marked resolved';
+                    try {
+                      await markAlertResolved(alertId);
+                    } catch (e) {
+                      msg = 'Could not resolve: $e';
+                    }
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Alert marked resolved')),
-                      );
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text(msg)));
                     }
                   },
                   icon: const Icon(Icons.check),

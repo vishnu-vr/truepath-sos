@@ -234,6 +234,39 @@ exports.mockLocation = onRequest({ region: REGION, cors: true }, async (req, res
 });
 
 /**
+ * Sends one FCM message to every phone of the given users and prunes tokens
+ * FCM reports dead. Returns the number of phones reached.
+ */
+async function pushToUids(uids, message) {
+  if (!uids || uids.length === 0) return 0;
+  const userSnaps = await db.getAll(...uids.map((u) => db.collection("users").doc(u)));
+  const tokens = [];
+  const tokenOwner = new Map();
+  for (const snap of userSnaps) {
+    for (const t of snap.data()?.fcmTokens || []) {
+      if (!tokenOwner.has(t)) {
+        tokenOwner.set(t, snap.ref);
+        tokens.push(t);
+      }
+    }
+  }
+  if (tokens.length === 0) return 0;
+  const result = await admin.messaging().sendEachForMulticast({ tokens, ...message });
+  const deadByRef = new Map();
+  result.responses.forEach((r, i) => {
+    const code = r.error?.code || "";
+    if (code.includes("registration-token-not-registered") || code.includes("invalid-argument")) {
+      const ref = tokenOwner.get(tokens[i]);
+      deadByRef.set(ref, [...(deadByRef.get(ref) || []), tokens[i]]);
+    }
+  });
+  await Promise.all(
+    [...deadByRef].map(([ref, dead]) => ref.update({ fcmTokens: FieldValue.arrayRemove(...dead) }))
+  );
+  return result.successCount;
+}
+
+/**
  * Shared alert pipeline (doc steps 11-13): store the alert, update the
  * device, push to every caregiver's phones, prune dead tokens. Used by the
  * real /sos and the admin /mockSos.
@@ -262,63 +295,35 @@ async function fireAlert(deviceRef, device, { type, sentAt, lat, lng, battery, s
   // An SOS is also a location fix: keep the live map/battery current.
   await recordLocation(deviceRef, { lat, lng, battery, at: sentAt, simulated });
 
-  // Push to every caregiver's devices (doc steps 12-13).
-  let sent = 0;
-  if (caregiverUids.length > 0) {
-    const userSnaps = await db.getAll(
-      ...caregiverUids.map((u) => db.collection("users").doc(u))
-    );
-    const tokens = [];
-    const tokenOwner = new Map();
-    for (const snap of userSnaps) {
-      for (const t of snap.data()?.fcmTokens || []) {
-        if (!tokenOwner.has(t)) {
-          tokenOwner.set(t, snap.ref);
-          tokens.push(t);
-        }
-      }
-    }
-    if (tokens.length > 0) {
-      const result = await admin.messaging().sendEachForMulticast({
-        tokens,
-        notification: {
-          title: simulated ? "🧪 TruePath SOS (test)" : "🆘 TruePath SOS",
-          body: `${device.name || deviceId} may need help — tap to see their location`,
-        },
-        data: {
-          alertId: alertRef.id,
-          deviceId,
-          type,
-          lat: String(lat),
-          lng: String(lng),
-          battery: String(battery),
-        },
-        android: {
-          priority: "high",
-          notification: { channelId: "sos_alerts", priority: "max", sound: "default" },
-        },
-        apns: {
-          headers: { "apns-priority": "10" },
-          payload: { aps: { sound: "default" } },
-        },
-      });
-      sent = result.successCount;
-      const deadByRef = new Map();
-      result.responses.forEach((r, i) => {
-        const code = r.error?.code || "";
-        if (code.includes("registration-token-not-registered") || code.includes("invalid-argument")) {
-          const ref = tokenOwner.get(tokens[i]);
-          deadByRef.set(ref, [...(deadByRef.get(ref) || []), tokens[i]]);
-        }
-      });
-      await Promise.all(
-        [...deadByRef].map(([ref, dead]) =>
-          ref.update({ fcmTokens: FieldValue.arrayRemove(...dead) })
-        )
-      );
-    } else {
-      logger.warn("No FCM tokens among caregivers", { deviceId });
-    }
+  // Alarm every caregiver's phones (doc steps 12-13). DATA-ONLY + high
+  // priority: the app wakes up (even when killed) and raises a full-screen,
+  // looping alarm itself, instead of Android showing a plain notification.
+  const title = simulated ? "🧪 TruePath SOS (test)" : "🆘 TruePath SOS";
+  const body = `${device.name || deviceId} may need help — tap to see their location`;
+  const sent = await pushToUids(caregiverUids, {
+    data: {
+      kind: "sos",
+      alertId: alertRef.id,
+      deviceId,
+      deviceName: device.name || deviceId,
+      type,
+      title,
+      body,
+      lat: String(lat),
+      lng: String(lng),
+      battery: String(battery),
+      sentAtMs: String(sentAt.getTime()),
+      simulated: simulated ? "1" : "0",
+    },
+    android: { priority: "high" },
+    // iOS (not shipped yet) still needs a visible alert.
+    apns: {
+      headers: { "apns-priority": "10" },
+      payload: { aps: { alert: { title, body }, sound: "default" } },
+    },
+  });
+  if (caregiverUids.length > 0 && sent === 0) {
+    logger.warn("No FCM tokens reached among caregivers", { deviceId });
   }
 
   logger.info("SOS stored", { alertId: alertRef.id, deviceId, pushSent: sent, simulated: !!simulated });
@@ -368,6 +373,75 @@ exports.mockSos = onRequest({ region: REGION, cors: true }, async (req, res) => 
     simulated: true,
   });
   res.status(201).json({ ok: true, alertId, pushSent });
+});
+
+/* ------------------------------------------------- acknowledge / resolve */
+
+/**
+ * A caregiver responds to an SOS. Body: { alertId, action?: "ack"|"resolve" }.
+ * - ack: records who is handling it (first responder wins).
+ * - resolve: marks it resolved (and acknowledged, if nobody had yet).
+ * Either way every caregiver's phone gets a "stop" push so the alarm stops
+ * ringing everywhere, showing who responded.
+ */
+exports.ack = onRequest({ region: REGION, cors: true }, async (req, res) => {
+  if (!postOnly(req, res)) return;
+  const user = await requireUser(req, res);
+  if (!user) return;
+  const { alertId, action = "ack" } = req.body || {};
+  if (typeof alertId !== "string" || !alertId || !["ack", "resolve"].includes(action)) {
+    res.status(400).json({ error: "alertId and action ('ack'|'resolve') required" });
+    return;
+  }
+  const ref = db.collection("alerts").doc(alertId);
+  const me = await memberInfo(user.uid);
+
+  let result;
+  try {
+    result = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw Object.assign(new Error("no such alert"), { status: 404 });
+      const a = snap.data();
+      if (!(a.caregiverUids || []).includes(user.uid)) {
+        throw Object.assign(new Error("only this cane's caregivers can respond"), { status: 403 });
+      }
+      const update = {};
+      if (!a.acknowledgedBy) {
+        update.acknowledgedBy = user.uid;
+        update.acknowledgedByName = me.name;
+        update.acknowledgedAt = FieldValue.serverTimestamp();
+      }
+      if (action === "resolve" && a.status !== "resolved") {
+        update.status = "resolved";
+        update.resolvedBy = user.uid;
+        update.resolvedAt = FieldValue.serverTimestamp();
+      }
+      if (Object.keys(update).length) tx.update(ref, update);
+      return {
+        caregiverUids: a.caregiverUids || [],
+        byName: a.acknowledgedByName || me.name,
+        changed: Object.keys(update).length > 0,
+      };
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+    return;
+  }
+
+  let stopped = 0;
+  if (result.changed) {
+    stopped = await pushToUids(result.caregiverUids, {
+      data: {
+        kind: "stop",
+        alertId,
+        reason: action === "resolve" ? "resolved" : "ack",
+        byName: action === "resolve" ? me.name : result.byName,
+      },
+      android: { priority: "high" },
+    });
+  }
+  logger.info("Alert response", { alertId, action, by: user.uid, stopped });
+  res.json({ ok: true, acknowledgedByName: result.byName, stopped });
 });
 
 /* ---------------------------------------------------------------- claim */

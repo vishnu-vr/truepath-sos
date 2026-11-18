@@ -21,8 +21,10 @@ python3 -m http.server 8787 -d web               # website  (task: "web: serve f
 3. In the app: create an account → Add cane → enter the claim code → cane
    appears under My canes with you as Owner+Primary.
 4. Cane screen → Add caregiver (e.g. demo@truepath.app) → badges update live.
-5. Home-button the app → `node simulator/sos.mjs --cane <deviceId>` →
-   notification arrives → tap → SOS screen → Open in Maps / Mark Resolved.
+5. Lock the phone → `node simulator/sos.mjs --cane <deviceId>` → the
+   screen wakes into the full-screen red alarm, ringing at alarm volume →
+   I'M ON IT → alarm stops on every caregiver's phone ("X is on it") → SOS
+   screen → Open in Maps / Mark Resolved.
 6. Website (localhost:8787): admin login shows the whole fleet; any other
    account sees only its canes.
 
@@ -45,6 +47,14 @@ python3 -m http.server 8787 -d web               # website  (task: "web: serve f
 | Static analysis | `cd app && flutter analyze` · `cd functions && node -e "require('./index.js')"` |
 
 ## Troubleshooting
+
+- **Emulator gets no pushes at all** (even FCM-accepted ones; happens after a
+  cold boot): Play services' push connection is stale. Toggle airplane mode
+  (`adb shell cmd connectivity airplane-mode enable`, then `disable`) —
+  queued messages arrive within seconds.
+- **SOS notification shows but is silent / no full-screen**: check the app's
+  alarm setup screen (⏰ icon) — all required items green; and see the
+  auto-group gotcha in [Mobile app](Mobile-App.md#sos-alarm-flow).
 
 - **Push not arriving**: app must have been opened once while signed in (token
   save); check `users/{uid}.fcmTokens` exists; emulator image must be

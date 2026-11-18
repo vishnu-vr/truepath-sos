@@ -17,6 +17,12 @@ JSON POST. Human endpoints require `Authorization: Bearer <Firebase ID token>`.
 ```
 - 201 `{ok, alertId, pushSent}` — alert stored, FCM sent to every caregiver's
   tokens (dead tokens pruned from `users/{uid}.fcmTokens`).
+- The push is **data-only** + `android.priority: high` (`kind: "sos"`,
+  `alertId`, `deviceName`, `title`, `body`, `lat`, `lng`, `battery`,
+  `sentAtMs`, `simulated`). There is deliberately no `notification` block:
+  the app wakes up and raises the full-screen looping alarm itself. (An
+  `apns` alert is included for a future iOS app.) Shared sender:
+  `pushToUids(uids, message)`.
 - 400 bad shape · 401 unknown device / wrong secret · 409 cane not claimed yet.
 - Side effects: creates `alerts` doc (denormalized `deviceName`,
   `caregiverUids`, `memberUids`), updates device `battery`/`lastSeenAt`.
@@ -66,6 +72,23 @@ Actions (target by `email` or `uid` where applicable):
 
 403 if caller is neither owner nor primary · 404 unknown cane or email.
 The `members{uid:{name,email}}` map is recomputed to only hold current people.
+
+## POST /ack — a caregiver responds to an SOS (ID token)
+
+```json
+{ "alertId": "...", "action": "ack" }     // or "resolve"
+```
+- Caller must be in the alert's `caregiverUids` (403 otherwise; 404 unknown).
+- `ack`: first responder wins → sets `acknowledgedBy`, `acknowledgedByName`,
+  `acknowledgedAt` (transaction; later acks don't overwrite).
+- `resolve`: sets `status: resolved`, `resolvedBy`, `resolvedAt` (and the
+  ack fields if nobody had acknowledged).
+- If anything changed, sends a data-only `kind: "stop"` push (`alertId`,
+  `reason: ack|resolved`, `byName`) to every caregiver's phones, so the alarm
+  stops ringing everywhere and shows who responded.
+- 200 `{ok, acknowledgedByName, stopped}`.
+- The app's "Mark Resolved" goes through here (falls back to the
+  rules-permitted direct Firestore write only if the backend is unreachable).
 
 ## POST /registerToken — claim a phone's FCM token
 

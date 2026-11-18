@@ -2,40 +2,36 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'alarm.dart';
 import 'api.dart';
 
 /// Wires Firebase Cloud Messaging for the caregiver (doc steps 13-15):
-/// permission, the max-importance "sos_alerts" channel, token registration in
-/// Firestore, foreground display, and tap -> SOS screen navigation.
+/// permission, token registration, and routing of the SOS alarm.
+///
+/// SOS pushes are DATA-ONLY: the app raises the alarm itself
+/// ([SosAlarm.ring]) — here in the foreground, or in
+/// `firebaseBackgroundHandler` (main.dart) when backgrounded/killed.
 class PushService {
   PushService._();
   static final PushService instance = PushService._();
 
-  static const _channel = AndroidNotificationChannel(
-    'sos_alerts',
-    'SOS alerts',
-    description: 'Urgent emergency alerts from TruePath canes',
-    importance: Importance.max,
-    playSound: true,
-  );
-
-  final _local = FlutterLocalNotificationsPlugin();
   bool _wired = false;
   String? _lastToken;
-  void Function(String alertId)? _onOpenAlert;
+  void Function(String alertId)? _onAlarm;
+  void Function(String alertId)? _onAck;
 
+  /// [onAlarm] opens the alarm screen; [onAck] handles the notification's
+  /// "I'm on it" action.
   Future<void> register({
     required String uid,
-    required void Function(String alertId) onOpenAlert,
+    required void Function(String alertId) onAlarm,
+    required void Function(String alertId) onAck,
   }) async {
-    _onOpenAlert = onOpenAlert;
+    _onAlarm = onAlarm;
+    _onAck = onAck;
     final messaging = FirebaseMessaging.instance;
 
-    await messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    await messaging.requestPermission(alert: true, badge: true, sound: true);
 
     // Save this phone's token so the backend can reach it (doc step 13).
     messaging.onRegistered.listen((t) => _saveToken(uid, t));
@@ -44,54 +40,31 @@ class PushService {
     if (_wired) return;
     _wired = true;
 
-    // Channel used by the backend's Android notification config.
-    await _local
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
+    await SosAlarm.init(onResponse: _onResponse);
 
-    await _local.initialize(
-      settings: const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      ),
-      onDidReceiveNotificationResponse: (response) {
-        final alertId = response.payload;
-        if (alertId != null && alertId.isNotEmpty) _onOpenAlert?.call(alertId);
-      },
-    );
-
-    // Foreground: FCM does not display automatically, so we do (doc step 14).
-    FirebaseMessaging.onMessage.listen((message) {
-      final n = message.notification;
-      if (n == null) return;
-      _local.show(
-        id: message.hashCode,
-        title: n.title,
-        body: n.body,
-        notificationDetails: NotificationDetails(
-          android: AndroidNotificationDetails(
-            _channel.id,
-            _channel.name,
-            channelDescription: _channel.description,
-            importance: Importance.max,
-            priority: Priority.max,
-          ),
-        ),
-        payload: message.data['alertId'],
-      );
+    // Foreground: ring + jump straight to the alarm screen.
+    FirebaseMessaging.onMessage.listen((message) async {
+      final alertId = await SosAlarm.handleData(message.data);
+      if (alertId != null) _onAlarm?.call(alertId);
     });
 
-    // Background tap (doc step 15).
-    FirebaseMessaging.onMessageOpenedApp.listen(_openFromMessage);
-
-    // App launched from terminated state by a notification tap.
-    final initial = await messaging.getInitialMessage();
-    if (initial != null) _openFromMessage(initial);
+    // App launched (cold) by the alarm: full-screen intent, a tap, or the
+    // "I'm on it" action.
+    final launch = await SosAlarm.plugin.getNotificationAppLaunchDetails();
+    final response = launch?.notificationResponse;
+    if ((launch?.didNotificationLaunchApp ?? false) && response != null) {
+      _onResponse(response);
+    }
   }
 
-  void _openFromMessage(RemoteMessage message) {
-    final alertId = message.data['alertId'];
-    if (alertId != null && alertId.isNotEmpty) _onOpenAlert?.call(alertId);
+  void _onResponse(NotificationResponse response) {
+    final alertId = response.payload;
+    if (alertId == null || alertId.isEmpty) return;
+    if (response.actionId == 'ack') {
+      _onAck?.call(alertId);
+    } else {
+      _onAlarm?.call(alertId);
+    }
   }
 
   /// Claims the token for this account via the backend, which also removes

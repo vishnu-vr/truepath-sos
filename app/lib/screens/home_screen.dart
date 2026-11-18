@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../push_service.dart';
+import 'alarm_setup_screen.dart';
 import 'alert_detail_screen.dart';
 import 'cane_screen.dart';
 import 'claim_screen.dart';
@@ -23,6 +24,13 @@ class HomeScreen extends StatelessWidget {
         appBar: AppBar(
           title: const Text('TruePath Care'),
           actions: [
+            IconButton(
+              tooltip: 'SOS alarm setup',
+              icon: const Icon(Icons.alarm),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AlarmSetupScreen()),
+              ),
+            ),
             IconButton(
               tooltip: 'Sign out',
               icon: const Icon(Icons.logout),
@@ -70,6 +78,13 @@ class _AlertsTab extends StatelessWidget {
         .orderBy('createdAt', descending: true)
         .limit(100);
 
+    return Column(children: [
+      const AlarmSetupBanner(),
+      Expanded(child: _alertList(query)),
+    ]);
+  }
+
+  Widget _alertList(Query<Map<String, dynamic>> query) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: query.snapshots(),
       builder: (context, snapshot) {
@@ -139,7 +154,12 @@ class _AlertCard extends StatelessWidget {
           data['deviceName'] ?? data['deviceId'] ?? 'Unknown device',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        subtitle: Text('$when · battery ${data['battery'] ?? '?'}%'),
+        subtitle: Text([
+          when,
+          'battery ${data['battery'] ?? '?'}%',
+          if (active && data['acknowledgedByName'] != null)
+            '${data['acknowledgedByName']} is on it',
+        ].join(' · ')),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => AlertDetailScreen(alertId: doc.id)),

@@ -31,6 +31,12 @@ an hour), [Runbook](wiki/Runbook.md) (how to run/demo/test everything).
   firebase_messaging's `register()` API needs the
   `firebase_messaging_installation_id_enabled` manifest meta-data. All already
   configured in `app/android/`.
+- SOS pushes are DATA-ONLY on purpose: the app raises a full-screen,
+  looping, alarm-stream notification itself (`app/lib/alarm.dart`) and
+  `/ack` sends a `stop` push to all caregivers. Never add a `notification`
+  block back. Each SOS notification needs its own `groupKey` — Android
+  silences auto-grouped notifications. If the emulator gets no pushes, toggle
+  airplane mode (stale Play-services connection).
 - All device/membership writes go through backend endpoints (`claim`,
   `manage`, `provision`) — Firestore rules block client writes on purpose.
   The only client write is resolving an alert.

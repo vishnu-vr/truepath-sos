@@ -43,8 +43,9 @@ Readable by anyone who can read the parent cane (rules `get()` on the device).
 deviceId, deviceName,
 caregiverUids: string[],    // snapshot at SOS time; may resolve
 memberUids: string[],       // caregivers + cane user; may read
-type, status: 'active' | 'resolved',
-location: GeoPoint, battery, sentAt, createdAt, resolvedAt, resolvedBy
+type, status: 'active' | 'resolved', simulated,
+location: GeoPoint, battery, sentAt, createdAt, resolvedAt, resolvedBy,
+acknowledgedBy, acknowledgedByName, acknowledgedAt   // set by /ack only
 ```
 
 ## Security rules (firestore.rules)

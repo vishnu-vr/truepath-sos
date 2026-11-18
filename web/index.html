@@ -564,7 +564,7 @@ onAuthStateChanged(auth, async (user) => {
       return `<tr>
         <td>${fmt(x.sentAt)}</td>
         <td><b>${esc(x.deviceName)}</b></td>
-        <td><span class="pill ${x.status === "active" ? "sos" : "resolved"}">${esc(x.status)}</span>${x.simulated ? ' <span class="pill test">test</span>' : ""}</td>
+        <td><span class="pill ${x.status === "active" ? "sos" : "resolved"}">${esc(x.status)}</span>${x.simulated ? ' <span class="pill test">test</span>' : ""}${x.acknowledgedByName ? `<div class="muted" style="font-size:12px;margin-top:3px">🏃 ${esc(x.acknowledgedByName)} on it</div>` : ""}</td>
         <td>${esc(x.battery)}%</td>
         <td>${loc}</td>
       </tr>`;
